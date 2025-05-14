@@ -81,10 +81,7 @@ export default function CarDepartureForm() {
       alert("Proszę wypełnić wszystkie wymagane pola!")
       return
     }
-    if (!garage && !garageNumber) {
-      alert("Proszę podać numer garażu!")
-      return
-    }
+   
     // Sprawdź, czy kwota do zapłaty jest podana, gdy status to "Do zapłaty"
     if (!paid && !paymentAmount) {
       alert("Proszę podać kwotę do zapłaty!")
