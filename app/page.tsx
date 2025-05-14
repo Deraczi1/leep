@@ -660,7 +660,7 @@ export default function CarDepartureForm() {
                               <>
                                 <div className="mx-2">|</div>
                                 <div className="mx-2 font-bold">
-                                  G{departure.garageNumber ? ` [${departure.garageNumber}]` : ""}
+                                  Garaż{departure.garageNumber ? ` [${departure.garageNumber}]` : ""}
                                 </div>
                               </>
                             )}
@@ -713,7 +713,7 @@ export default function CarDepartureForm() {
                               <>
                                 <div className="mx-2">|</div>
                                 <div className="mx-2 font-bold">
-                                  G{departure.garageNumber ? ` [${departure.garageNumber}]` : ""}
+                                  Garaż{departure.garageNumber ? ` [${departure.garageNumber}]` : ""}
                                 </div>
                               </>
                             )}
