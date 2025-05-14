@@ -536,7 +536,7 @@ export default function CarDepartureForm() {
                   id="carModel"
                   value={carModel}
                   onChange={(e) => setCarModel(e.target.value)}
-                  placeholder="np. SKODA FABIA SMY8HP6"
+                  placeholder="np. SKODA FABIA SMI12345"
                 />
               </div>
 
@@ -608,7 +608,7 @@ export default function CarDepartureForm() {
                   id="bulkText"
                   value={bulkText}
                   onChange={(e) => setBulkText(e.target.value)}
-                  placeholder="Np. [12] Ford Mondeo OKL39353 12x zapłacone&#10;4 maja 2025, 00:15–14 maja 2025, 03:00&#10;Oleksandr Yankov 886 383 154&#10;Antalia 4M873"
+                  placeholder="NP. [12] Ford Mondeo OKL39353 12x zapłacone&#10;4 maja 2025, 00:15–14 maja 2025, 03:00&#10;Oleksandr Yankov 886 383 154&#10;Antalia 4M873"
                   className="min-h-[150px]"
                 />
               </div>
