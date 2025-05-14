@@ -23,7 +23,8 @@ interface CarDeparture {
   garage: boolean
   flightInfo: string
   additionalInfo: string
-  garageNumber?: string // Zmienione z carNumber na garageNumber
+  garageNumber?: string
+  paymentAmount?: string // Nowe pole na kwotę do zapłaty
 }
 
 interface DaySchedule {
@@ -43,6 +44,7 @@ export default function CarDepartureForm() {
   const [garage, setGarage] = useState(false)
   const [additionalInfo, setAdditionalInfo] = useState("")
   const [garageNumber, setGarageNumber] = useState("")
+  const [paymentAmount, setPaymentAmount] = useState("") // Nowy stan na kwotę do zapłaty
   const [combineSmallDays, setCombineSmallDays] = useState(false)
   const [carsThreshold, setCarsThreshold] = useState(3)
   const [bulkText, setBulkText] = useState("")
@@ -71,11 +73,21 @@ export default function CarDepartureForm() {
     setGarage(false)
     setAdditionalInfo("")
     setGarageNumber("")
+    setPaymentAmount("") // Wyczyść kwotę do zapłaty
   }
 
   const addDeparture = () => {
     if (!date || !time || !name || !carModel || !flightInfo) {
       alert("Proszę wypełnić wszystkie wymagane pola!")
+      return
+    }
+    if (!garage && !garageNumber) {
+      alert("Proszę podać numer garażu!")
+      return
+    }
+    // Sprawdź, czy kwota do zapłaty jest podana, gdy status to "Do zapłaty"
+    if (!paid && !paymentAmount) {
+      alert("Proszę podać kwotę do zapłaty!")
       return
     }
 
@@ -88,6 +100,7 @@ export default function CarDepartureForm() {
       flightInfo,
       additionalInfo,
       garageNumber,
+      paymentAmount: !paid ? paymentAmount : undefined, // Dodaj kwotę tylko gdy status to "Do zapłaty"
     }
 
     // Sprawdź czy istnieje już harmonogram na ten dzień
@@ -145,6 +158,7 @@ export default function CarDepartureForm() {
       let carModel = ""
       let isPaid = false
       let garageNumber = ""
+      let amount = ""
 
       // Sprawdź, czy linia zaczyna się od numeru w nawiasach kwadratowych [X]
       const garageNumberRegex = /^\[(\d+)\]/
@@ -156,11 +170,19 @@ export default function CarDepartureForm() {
         carLine = carLine.replace(garageNumberRegex, "").trim()
       }
 
-      // Sprawdź status płatności
+      // Sprawdź status płatności i wyciągnij kwotę do zapłaty jeśli jest
       if (carLine.includes("zapłacone") || carLine.includes(" Z") || carLine.includes("zapłacono")) {
         isPaid = true
       } else if (carLine.includes("Do zapłaty") || carLine.includes("DZ")) {
         isPaid = false
+
+        // Spróbuj wyciągnąć kwotę do zapłaty
+        const amountRegex = /Do zapłaty\s+(\d+(?:[.,]\d+)?)/i
+        const amountMatch = carLine.match(amountRegex)
+
+        if (amountMatch && amountMatch[1]) {
+          amount = amountMatch[1].replace(",", ".")
+        }
       } else {
         // Domyślnie zakładamy, że jest zapłacone
         isPaid = true
@@ -171,10 +193,12 @@ export default function CarDepartureForm() {
         .replace(/\d+x\s*zapłacone/gi, "")
         .replace(/\d+x\s*Z/gi, "")
         .replace(/\d+x\s*zapłacono/gi, "")
+        .replace(/\d+x\s*Do zapłaty\s*\d+(?:[.,]\d+)?/gi, "")
         .replace(/\d+x\s*Do zapłaty/gi, "")
         .replace(/\d+x\s*DZ/gi, "")
         .replace(/zapłacone/gi, "")
         .replace(/zapłacono/gi, "")
+        .replace(/Do zapłaty\s*\d+(?:[.,]\d+)?/gi, "")
         .replace(/Do zapłaty/gi, "")
         .replace(/\s+Z$/gi, "")
         .replace(/\s+DZ$/gi, "")
@@ -345,6 +369,7 @@ export default function CarDepartureForm() {
       setFlightInfo(flightInfo)
       setPaid(isPaid)
       setGarageNumber(garageNumber)
+      setPaymentAmount(amount) // Ustaw kwotę do zapłaty
       if (garageNumber) {
         setGarage(true) // Jeśli jest numer garażu, to zaznacz checkbox garażu
       }
@@ -455,8 +480,6 @@ export default function CarDepartureForm() {
 
   return (
     <div className="container mx-auto p-4">
-      <h1 className="text-2xl font-bold mb-6">Formularz wyjazdów samochodów</h1>
-
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <div className="space-y-4 p-4 border rounded-lg">
           <Tabs value={activeTab} onValueChange={setActiveTab}>
@@ -531,6 +554,22 @@ export default function CarDepartureForm() {
                 <Checkbox id="paid" checked={paid} onCheckedChange={(checked) => setPaid(checked as boolean)} />
                 <Label htmlFor="paid">Zapłacone (Z/DZ)</Label>
               </div>
+
+              {!paid && (
+                <div className="space-y-2 ml-6">
+                  <Label htmlFor="paymentAmount">Kwota do zapłaty (zł)</Label>
+                  <Input
+                    id="paymentAmount"
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={paymentAmount}
+                    onChange={(e) => setPaymentAmount(e.target.value)}
+                    placeholder="np. 150.00"
+                    required
+                  />
+                </div>
+              )}
 
               <div className="flex items-center space-x-2">
                 <Checkbox id="garage" checked={garage} onCheckedChange={(checked) => setGarage(checked as boolean)} />
@@ -653,14 +692,18 @@ export default function CarDepartureForm() {
                             <div className="mx-2">|</div>
                             <div className="mx-2">{departure.carModel}</div>
                             <div className="mx-2">|</div>
-                            <div className="mx-2 font-bold">{departure.paid ? "Z" : "DZ"}</div>
+                            <div className="mx-2 font-bold">
+                              {departure.paid
+                                ? "Z"
+                                : `DZ ${departure.paymentAmount ? departure.paymentAmount + " zł" : ""}`}
+                            </div>
                             <div className="mx-2">|</div>
                             <div className="mx-2">{departure.flightInfo}</div>
                             {departure.garage && (
                               <>
                                 <div className="mx-2">|</div>
                                 <div className="mx-2 font-bold">
-                                  Garaż{departure.garageNumber ? ` [${departure.garageNumber}]` : ""}
+                                  Garaż: {departure.garageNumber ? ` [${departure.garageNumber}]` : ""}
                                 </div>
                               </>
                             )}
@@ -706,14 +749,18 @@ export default function CarDepartureForm() {
                             <div className="mx-2">|</div>
                             <div className="mx-2">{departure.carModel}</div>
                             <div className="mx-2">|</div>
-                            <div className="mx-2 font-bold">{departure.paid ? "Z" : "DZ"}</div>
+                            <div className="mx-2 font-bold">
+                              {departure.paid
+                                ? "Z"
+                                : `DZ ${departure.paymentAmount ? departure.paymentAmount + " zł" : ""}`}
+                            </div>
                             <div className="mx-2">|</div>
                             <div className="mx-2">{departure.flightInfo}</div>
                             {departure.garage && (
                               <>
                                 <div className="mx-2">|</div>
                                 <div className="mx-2 font-bold">
-                                  Garaż{departure.garageNumber ? ` [${departure.garageNumber}]` : ""}
+                                  Garaż: {departure.garageNumber ? ` [${departure.garageNumber}]` : ""}
                                 </div>
                               </>
                             )}
@@ -759,14 +806,18 @@ export default function CarDepartureForm() {
                           <div className="mx-2">|</div>
                           <div className="mx-2">{departure.carModel}</div>
                           <div className="mx-2">|</div>
-                          <div className="mx-2 font-bold">{departure.paid ? "Z" : "DZ"}</div>
+                          <div className="mx-2 font-bold">
+                            {departure.paid
+                              ? "Z"
+                              : `DZ ${departure.paymentAmount ? departure.paymentAmount + " zł" : ""}`}
+                          </div>
                           <div className="mx-2">|</div>
                           <div className="mx-2">{departure.flightInfo}</div>
                           {departure.garage && (
                             <>
                               <div className="mx-2">|</div>
                               <div className="mx-2 font-bold">
-                                G{departure.garageNumber ? ` [${departure.garageNumber}]` : ""}
+                                Garaż: {departure.garageNumber ? ` [${departure.garageNumber}]` : ""}
                               </div>
                             </>
                           )}
