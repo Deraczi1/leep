@@ -14,6 +14,7 @@ import { cn } from "@/lib/utils"
 import { Textarea } from "@/components/ui/textarea"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Alert, AlertDescription } from "@/components/ui/alert"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 
 interface CarDeparture {
   time: string
@@ -23,8 +24,9 @@ interface CarDeparture {
   garage: boolean
   flightInfo: string
   additionalInfo: string
+  internalInfo: string // Nowe pole na informacje wewnętrzne
   garageNumber?: string
-  paymentAmount?: string // Nowe pole na kwotę do zapłaty
+  paymentAmount?: string
 }
 
 interface DaySchedule {
@@ -43,14 +45,43 @@ export default function CarDepartureForm() {
   const [paid, setPaid] = useState(true)
   const [garage, setGarage] = useState(false)
   const [additionalInfo, setAdditionalInfo] = useState("")
+  const [internalInfo, setInternalInfo] = useState("") // Nowy stan na informacje wewnętrzne
   const [garageNumber, setGarageNumber] = useState("")
-  const [paymentAmount, setPaymentAmount] = useState("") // Nowy stan na kwotę do zapłaty
+  const [paymentAmount, setPaymentAmount] = useState("")
   const [combineSmallDays, setCombineSmallDays] = useState(false)
   const [carsThreshold, setCarsThreshold] = useState(3)
   const [bulkText, setBulkText] = useState("")
   const [parseResult, setParseResult] = useState<{ success: boolean; message: string }>({ success: true, message: "" })
   const [activeTab, setActiveTab] = useState("manual")
   const printRef = useRef<HTMLDivElement>(null)
+  const [debugInfo, setDebugInfo] = useState<string>("")
+  const [showDebug, setShowDebug] = useState(false)
+
+  // Dodaj te stany po istniejących stanach
+  const [apiSend, setApiSend] = useState(false)
+  const [carBrand, setCarBrand] = useState("")
+  const [carModelOnly, setCarModelOnly] = useState("")
+  const [carNumber, setCarNumber] = useState("")
+  const [phone, setPhone] = useState("")
+  const [email, setEmail] = useState("")
+  const [rating, setRating] = useState(0)
+  const [nip, setNip] = useState("")
+  const [dayCounter, setDayCounter] = useState(3)
+  const [forListInfo, setForListInfo] = useState("")
+  const [leftKey, setLeftKey] = useState(false)
+  const [payInUsd, setPayInUsd] = useState(false)
+  const [payInEur, setPayInEur] = useState(false)
+  const [charger, setCharger] = useState(false)
+  const [smallCar, setSmallCar] = useState(false)
+  const [geogrid, setGeogrid] = useState(false)
+  const [isTake, setIsTake] = useState(false)
+  const [nipTake, setNipTake] = useState(false)
+
+  // Dodaj stany dla dat przyjazdu i wyjazdu
+  const [comeDate, setComeDate] = useState<Date | undefined>(new Date())
+  const [comeTime, setComeTime] = useState("")
+  const [leaveDate, setLeaveDate] = useState<Date | undefined>(new Date())
+  const [leaveTime, setLeaveTime] = useState("")
 
   const getHolidayName = (date: Date): string => {
     const day = date.getDate()
@@ -72,17 +103,43 @@ export default function CarDepartureForm() {
     setPaid(true)
     setGarage(false)
     setAdditionalInfo("")
+    setInternalInfo("") // Wyczyść informacje wewnętrzne
     setGarageNumber("")
-    setPaymentAmount("") // Wyczyść kwotę do zapłaty
+    setPaymentAmount("")
+    setDebugInfo("")
+
+    // Czyszczenie nowych pól
+    setCarBrand("")
+    setCarModelOnly("")
+    setCarNumber("")
+    setPhone("")
+    setEmail("")
+    setRating(0)
+    setNip("")
+    setDayCounter(3)
+    setForListInfo("")
+    setLeftKey(false)
+    setPayInUsd(false)
+    setPayInEur(false)
+    setCharger(false)
+    setSmallCar(false)
+    setGeogrid(false)
+    setIsTake(false)
+    setNipTake(false)
+
+    // Czyszczenie dat przyjazdu i wyjazdu
+    setComeDate(new Date())
+    setComeTime("")
+    setLeaveDate(new Date())
+    setLeaveTime("")
   }
 
-  const addDeparture = () => {
+  const addDeparture = async () => {
     if (!date || !time || !name || !carModel || !flightInfo) {
       alert("Proszę wypełnić wszystkie wymagane pola!")
       return
     }
-   
-    // Sprawdź, czy kwota do zapłaty jest podana, gdy status to "Do zapłaty"
+
     if (!paid && !paymentAmount) {
       alert("Proszę podać kwotę do zapłaty!")
       return
@@ -96,36 +153,119 @@ export default function CarDepartureForm() {
       garage,
       flightInfo,
       additionalInfo,
+      internalInfo, // Dodaj informacje wewnętrzne
       garageNumber,
-      paymentAmount: !paid ? paymentAmount : undefined, // Dodaj kwotę tylko gdy status to "Do zapłaty"
+      paymentAmount: !paid ? paymentAmount : undefined,
     }
 
-    // Sprawdź czy istnieje już harmonogram na ten dzień
-    const existingDayIndex = schedule.findIndex((day) => day.date.toDateString() === date.toDateString())
+    // Konwersja daty i godziny na timestamp
+    let comeTimestamp: number
+    let leaveTimestamp: number
 
-    if (existingDayIndex >= 0) {
-      // Dodaj wyjazd do istniejącego dnia
-      const updatedSchedule = [...schedule]
-      updatedSchedule[existingDayIndex].departures.push(newDeparture)
-      // Sortuj wyjazdy według czasu
-      updatedSchedule[existingDayIndex].departures.sort((a, b) => a.time.localeCompare(b.time))
-      setSchedule(updatedSchedule)
+    // Jeśli mamy daty przyjazdu i wyjazdu, użyj ich
+    if (comeDate && comeTime) {
+      const [comeHours, comeMinutes] = comeTime.split(":").map(Number)
+      const comeDateObj = new Date(comeDate)
+      comeDateObj.setHours(comeHours, comeMinutes, 0, 0)
+      comeTimestamp = comeDateObj.getTime()
     } else {
-      // Utwórz nowy dzień z wyjazdem
-      const newDay: DaySchedule = {
-        date: new Date(date),
-        title: getHolidayName(date),
-        departures: [newDeparture],
+      // Fallback do daty wyjazdu
+      const [hours, minutes] = time.split(":").map(Number)
+      const departureDateObj = new Date(date)
+      departureDateObj.setHours(hours, minutes, 0, 0)
+      comeTimestamp = departureDateObj.getTime()
+    }
+
+    if (leaveDate && leaveTime) {
+      const [leaveHours, leaveMinutes] = leaveTime.split(":").map(Number)
+      const leaveDateObj = new Date(leaveDate)
+      leaveDateObj.setHours(leaveHours, leaveMinutes, 0, 0)
+      leaveTimestamp = leaveDateObj.getTime()
+    } else {
+      // Fallback - oblicz leave_time jako dayCounter dni później od comeTimestamp
+      leaveTimestamp = comeTimestamp + dayCounter * 24 * 60 * 60 * 1000
+    }
+
+    // Budujemy payload dla API
+    const payload = {
+      id: crypto.randomUUID(),
+      come_time: comeTimestamp,
+      leave_time: leaveTimestamp,
+      reservation_name: name,
+      car_brand: carBrand || "",
+      car_model: carModelOnly || "",
+      car_number: carNumber || "",
+      fly: JSON.stringify({ info: flightInfo }),
+      for_us_info: internalInfo || "", // Używamy pola internalInfo
+      for_list_info: additionalInfo || "", // Używamy pola additionalInfo dla listy
+      garage: JSON.stringify({ number: garageNumber ? Number.parseInt(garageNumber) : 0 }),
+      is_pay: paid ? 1 : 0,
+      prize: !paid && paymentAmount ? Math.round(Number.parseFloat(paymentAmount)) : 0,
+      create_time: Date.now(),
+      last_edit_time: Date.now(),
+      who_entered: "nextjs_ui",
+      api_write: "departure_panel",
+      phone: phone || "",
+      email: email || "",
+      nip: nip || "",
+      rating: rating || 0,
+      charger: charger ? 1 : 0,
+      small_car: smallCar ? 1 : 0,
+      geogrid: geogrid ? 1 : 0,
+      day_counter: dayCounter || 3,
+      left_key: leftKey ? 1 : 0,
+      pay_in_usd: payInUsd ? 1 : 0,
+      pay_in_eur: payInEur ? 1 : 0,
+      surcharge: JSON.stringify({}),
+      without_reservation: 1,
+      delivery: JSON.stringify({}),
+      is_take: isTake ? 1 : 0,
+      nipTake: nipTake ? 1 : 0,
+      web_site_reservation: 1,
+    }
+
+    try {
+      // Wysyłaj dane do API tylko jeśli apiSend jest true
+      if (apiSend) {
+        const response = await fetch("https://7581-80-49-194-249.ngrok-free.app/add_reservation", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        })
+
+        if (!response.ok) {
+          throw new Error(`Błąd serwera: ${response.status}`)
+        }
+
+        const result = await response.json()
+        console.log("Rezerwacja wysłana, odpowiedź serwera:", result)
+      } else {
+        console.log("Tryb testowy - dane nie zostały wysłane do API:", payload)
       }
 
-      // Dodaj nowy dzień i posortuj dni według daty
-      const updatedSchedule = [...schedule, newDay].sort((a, b) => a.date.getTime() - b.date.getTime())
+      // Aktualizujemy stan harmonogramu (jak w Twoim oryginalnym kodzie)
+      const existingDayIndex = schedule.findIndex((day) => day.date.toDateString() === date.toDateString())
 
-      setSchedule(updatedSchedule)
+      if (existingDayIndex >= 0) {
+        const updatedSchedule = [...schedule]
+        updatedSchedule[existingDayIndex].departures.push(newDeparture)
+        updatedSchedule[existingDayIndex].departures.sort((a, b) => a.time.localeCompare(b.time))
+        setSchedule(updatedSchedule)
+      } else {
+        const newDay: DaySchedule = {
+          date: new Date(date),
+          title: getHolidayName(date),
+          departures: [newDeparture],
+        }
+
+        const updatedSchedule = [...schedule, newDay].sort((a, b) => a.date.getTime() - b.date.getTime())
+        setSchedule(updatedSchedule)
+      }
+
+      clearForm()
+    } catch (error) {
+      alert("Wystąpił błąd podczas wysyłania rezerwacji: " + error.message)
     }
-
-    // Wyczyść formularz
-    clearForm()
   }
 
   const parseBulkText = () => {
@@ -138,14 +278,15 @@ export default function CarDepartureForm() {
     }
 
     try {
-      // Rozdziel tekst na linie
-      const lines = bulkText.trim().split("\n")
+      // Rozdziel tekst na linie i usuń puste linie
+      const allLines = bulkText.trim().split("\n")
+      const lines = allLines.filter((line) => line.trim() !== "")
 
       // Sprawdź, czy mamy wystarczającą liczbę linii
       if (lines.length < 3) {
         setParseResult({
           success: false,
-          message: "Tekst jest zbyt krótki. Potrzebne są co najmniej 3 linie.",
+          message: "Tekst jest zbyt krótki. Potrzebne są co najmniej 3 linie z danymi.",
         })
         return
       }
@@ -153,9 +294,11 @@ export default function CarDepartureForm() {
       // Pierwsza linia zawiera informacje o samochodzie i statusie płatności
       let carLine = lines[0]
       let carModel = ""
-      let isPaid = false
+      let isPaid = true // Domyślnie zakładamy, że jest zapłacone
       let garageNumber = ""
       let amount = ""
+      let daysCount = 3 // Domyślna wartość
+      const keywordsFound = new Set<string>()
 
       // Sprawdź, czy linia zaczyna się od numeru w nawiasach kwadratowych [X]
       const garageNumberRegex = /^\[(\d+)\]/
@@ -167,26 +310,79 @@ export default function CarDepartureForm() {
         carLine = carLine.replace(garageNumberRegex, "").trim()
       }
 
-      // Sprawdź status płatności i wyciągnij kwotę do zapłaty jeśli jest
-      if (carLine.includes("zapłacone") || carLine.includes(" Z") || carLine.includes("zapłacono")) {
-        isPaid = true
-      } else if (carLine.includes("Do zapłaty") || carLine.includes("DZ")) {
+      // Sprawdź czy w linii jest informacja o liczbie dni (np. 12x)
+      const daysRegex = /(\d+)x/i
+      const daysMatch = carLine.match(daysRegex)
+      if (daysMatch && daysMatch[1]) {
+        daysCount = Number.parseInt(daysMatch[1], 10)
+        // Nie usuwamy tego z linii, bo będzie usunięte później
+      }
+
+      // Sprawdź słowa kluczowe w linii samochodu
+      const keywordsToCheck = [
+        "klucze",
+        "garaż",
+        "ładowarki",
+        "geokratka",
+        "małe auto",
+        "brak rezerwacji",
+        "dowóz",
+        "dowóz (1 strona)",
+      ]
+
+      keywordsToCheck.forEach((keyword) => {
+        const regex = new RegExp(keyword, "i")
+        if (regex.test(carLine)) {
+          keywordsFound.add(keyword.toLowerCase())
+          // Usuń słowo kluczowe z linii samochodu
+          carLine = carLine.replace(regex, "").trim()
+        }
+      })
+
+      // WAŻNE: Najpierw sprawdź status płatności, zanim zmodyfikujemy carLine
+      const originalCarLine = carLine // Zachowaj oryginalną linię
+      const carLineLower = originalCarLine.toLowerCase()
+
+      // Sprawdź status płatności - najpierw sprawdź "do zapłaty"/"dz"
+      if (
+        carLineLower.includes("do zapłaty") ||
+        carLineLower.includes(" dz") ||
+        carLineLower.includes(" dz ") ||
+        carLineLower.includes("dz ") ||
+        carLineLower.match(/\bdz\b/) !== null
+      ) {
         isPaid = false
 
         // Spróbuj wyciągnąć kwotę do zapłaty
-        const amountRegex = /Do zapłaty\s+(\d+(?:[.,]\d+)?)/i
-        const amountMatch = carLine.match(amountRegex)
+        const amountRegex = /do zapłaty\s+(\d+(?:[.,]\d+)?)/i
+        const amountMatch = originalCarLine.match(amountRegex)
 
         if (amountMatch && amountMatch[1]) {
-          amount = amountMatch[1].replace(",", ".")
+          amount = Math.round(Number.parseFloat(amountMatch[1].replace(",", "."))).toString()
         }
-      } else {
-        // Domyślnie zakładamy, że jest zapłacone
+      }
+      // Jeśli nie znaleziono "do zapłaty", sprawdź "zapłacone"/"z"
+      else if (
+        carLineLower.includes("zapłacone") ||
+        carLineLower.includes(" z") ||
+        carLineLower.includes("zapłacono") ||
+        carLineLower.includes(" z ") ||
+        carLineLower.match(/\bz\b/) !== null
+      ) {
         isPaid = true
       }
 
+      // Dodaj informacje diagnostyczne
+      let debugText = `Oryginalna linia: "${originalCarLine}"\n`
+      debugText += `Linia małymi literami: "${carLineLower}"\n`
+      debugText += `Status płatności: ${isPaid ? "Zapłacone (Z)" : "Do zapłaty (DZ)"}\n`
+
+      if (!isPaid && amount) {
+        debugText += `Kwota do zapłaty: ${amount} zł\n`
+      }
+
       // Usuń informacje o płatności z modelu samochodu
-      carModel = carLine
+      carModel = originalCarLine
         .replace(/\d+x\s*zapłacone/gi, "")
         .replace(/\d+x\s*Z/gi, "")
         .replace(/\d+x\s*zapłacono/gi, "")
@@ -202,23 +398,74 @@ export default function CarDepartureForm() {
         .replace(/\d+x/gi, "")
         .trim()
 
-      // Druga linia zawiera daty i godziny (format: data wyjazdu, godzina–data powrotu, godzina)
+      // Rozdziel dane samochodu na markę, model i numer rejestracyjny
+      // Nowa logika rozdzielania danych samochodu
+      const carParts = carModel.split(/\s+/)
+
+      if (carParts.length >= 2) {
+        // Sprawdź, czy ostatni element wygląda jak numer rejestracyjny (zawiera cyfry i litery)
+        const lastPart = carParts[carParts.length - 1]
+        const isLicensePlate = /^[A-Z0-9]+$/i.test(lastPart)
+
+        if (isLicensePlate) {
+          // Mamy numer rejestracyjny
+          setCarNumber(lastPart)
+
+          // Pierwszy element to zawsze marka
+          setCarBrand(carParts[0])
+
+          // Jeśli mamy więcej niż 2 części, środkowe elementy to model
+          if (carParts.length > 2) {
+            setCarModelOnly(carParts.slice(1, carParts.length - 1).join(" "))
+          } else {
+            // Jeśli mamy tylko 2 części (markę i numer), model jest pusty
+            setCarModelOnly("")
+          }
+        } else {
+          // Nie mamy numeru rejestracyjnego
+          setCarBrand(carParts[0])
+          setCarModelOnly(carParts.slice(1).join(" "))
+          setCarNumber("")
+        }
+      } else if (carParts.length === 1) {
+        // Mamy tylko jedną część - zakładamy, że to marka
+        setCarBrand(carParts[0])
+        setCarModelOnly("")
+        setCarNumber("")
+      } else {
+        // Pusty string
+        setCarBrand("")
+        setCarModelOnly("")
+        setCarNumber("")
+      }
+
+      // Sprawdź słowa kluczowe w pozostałych liniach
+      for (let i = 1; i < lines.length; i++) {
+        keywordsToCheck.forEach((keyword) => {
+          const regex = new RegExp(keyword, "i")
+          if (regex.test(lines[i])) {
+            keywordsFound.add(keyword.toLowerCase())
+            // Usuń słowo kluczowe z linii
+            lines[i] = lines[i].replace(regex, "").trim()
+          }
+        })
+      }
+
+      // Druga linia zawiera daty i godziny
       const dateLine = lines[1]
 
-      // Wyciągnij datę i godzinę powrotu
-      const returnRegex = /–(\d+)\s+([a-zA-Zżźćńółęąśź]+)\s+(\d{4}),\s+(\d{2}):(\d{2})/i
-      const returnMatch = dateLine.match(returnRegex)
+      // Nowa logika do wyciągania dat przyjazdu i wyjazdu
+      // Format: "5 maja 2025, 02:30–16 maja 2025, 02:00"
+      const dateTimeRegex =
+        /(\d+)\s+([a-zA-Zżźćńółęąśź]+)\s+(\d{4}),\s+(\d{2}):(\d{2})–(\d+)\s+([a-zA-Zżźćńółęąśź]+)\s+(\d{4}),\s+(\d{2}):(\d{2})/i
+      const dateTimeMatch = dateLine.match(dateTimeRegex)
 
-      let returnDate: Date | undefined
-      let returnTime = ""
+      let arrivalDate: Date | undefined
+      let arrivalTime = ""
+      let departureDate: Date | undefined
+      let departureTime = ""
 
-      if (returnMatch) {
-        const returnDay = Number.parseInt(returnMatch[1])
-        const returnMonthName = returnMatch[2].toLowerCase()
-        const returnYear = Number.parseInt(returnMatch[3])
-        const returnHour = returnMatch[4]
-        const returnMinute = returnMatch[5]
-
+      if (dateTimeMatch) {
         // Mapowanie polskich nazw miesięcy na numery
         const monthMap: { [key: string]: number } = {
           stycznia: 0,
@@ -260,27 +507,44 @@ export default function CarDepartureForm() {
           gru: 11,
         }
 
-        const returnMonthNum = monthMap[returnMonthName]
+        // Dane przyjazdu
+        const arrivalDay = Number.parseInt(dateTimeMatch[1])
+        const arrivalMonthName = dateTimeMatch[2].toLowerCase()
+        const arrivalYear = Number.parseInt(dateTimeMatch[3])
+        const arrivalHour = dateTimeMatch[4]
+        const arrivalMinute = dateTimeMatch[5]
 
-        if (returnMonthNum !== undefined) {
-          returnDate = new Date(returnYear, returnMonthNum, returnDay)
-          returnTime = `${returnHour}:${returnMinute}`
+        // Dane wyjazdu
+        const departureDay = Number.parseInt(dateTimeMatch[6])
+        const departureMonthName = dateTimeMatch[7].toLowerCase()
+        const departureYear = Number.parseInt(dateTimeMatch[8])
+        const departureHour = dateTimeMatch[9]
+        const departureMinute = dateTimeMatch[10]
+
+        const arrivalMonthNum = monthMap[arrivalMonthName]
+        const departureMonthNum = monthMap[departureMonthName]
+
+        if (arrivalMonthNum !== undefined && departureMonthNum !== undefined) {
+          arrivalDate = new Date(arrivalYear, arrivalMonthNum, arrivalDay)
+          arrivalTime = `${arrivalHour}:${arrivalMinute}`
+
+          departureDate = new Date(departureYear, departureMonthNum, departureDay)
+          departureTime = `${departureHour}:${departureMinute}`
         }
       }
 
-      // Jeśli nie znaleziono daty powrotu, spróbuj użyć daty wyjazdu jako fallback
-      if (!returnDate) {
-        const departureDateTimeRegex = /(\d+)\s+([a-zA-Zżźćńółęąśź]+)\s+(\d{4}),\s+(\d{2}):(\d{2})/i
-        const departureDateMatch = dateLine.match(departureDateTimeRegex)
+      // Jeśli nie udało się dopasować pełnego wzorca, spróbuj wyciągnąć tylko datę przyjazdu
+      if (!arrivalDate) {
+        const singleDateTimeRegex = /(\d+)\s+([a-zA-Zżźćńółęąśź]+)\s+(\d{4}),\s+(\d{2}):(\d{2})/i
+        const singleDateMatch = dateLine.match(singleDateTimeRegex)
 
-        if (departureDateMatch) {
-          const day = Number.parseInt(departureDateMatch[1])
-          const monthName = departureDateMatch[2].toLowerCase()
-          const year = Number.parseInt(departureDateMatch[3])
-          const hour = departureDateMatch[4]
-          const minute = departureDateMatch[5]
+        if (singleDateMatch) {
+          const day = Number.parseInt(singleDateMatch[1])
+          const monthName = singleDateMatch[2].toLowerCase()
+          const year = Number.parseInt(singleDateMatch[3])
+          const hour = singleDateMatch[4]
+          const minute = singleDateMatch[5]
 
-          // Mapowanie polskich nazw miesięcy na numery
           const monthMap: { [key: string]: number } = {
             stycznia: 0,
             styczeń: 0,
@@ -324,43 +588,101 @@ export default function CarDepartureForm() {
           const monthNum = monthMap[monthName]
 
           if (monthNum !== undefined) {
-            returnDate = new Date(year, monthNum, day)
-            returnTime = `${hour}:${minute}`
+            arrivalDate = new Date(year, monthNum, day)
+            arrivalTime = `${hour}:${minute}`
+
+            // Oblicz datę wyjazdu na podstawie liczby dni
+            departureDate = new Date(arrivalDate)
+            departureDate.setDate(departureDate.getDate() + daysCount)
+            departureTime = arrivalTime // Użyj tej samej godziny
           }
         }
       }
 
-      if (!returnDate) {
+      if (!arrivalDate) {
         setParseResult({
           success: false,
-          message: "Nie udało się rozpoznać daty powrotu.",
+          message: "Nie udało się rozpoznać daty przyjazdu.",
         })
         return
       }
 
       // Trzecia linia zawiera imię i nazwisko oraz numer telefonu
-      const nameLine = lines[2]
-      const nameRegex = /([A-Za-zżźćńółęąśŻŹĆŃÓŁĘĄŚ\s]+)(?:\s+\d{3}\s+\d{3}\s+\d{3}|\s+\+\d+|\s*$)/
-      const nameMatch = nameLine.match(nameRegex)
-
+      // Znajdź linię z imieniem i nazwiskiem - szukamy linii z numerem telefonu
       let personName = ""
+      let phoneNumber = ""
 
-      if (nameMatch && nameMatch[1]) {
-        personName = nameMatch[1].trim()
-      } else {
-        // Jeśli nie udało się dopasować wzorca, weź całą linię jako imię i nazwisko
-        personName = nameLine.trim()
+      // Szukamy linii z numerem telefonu (po drugiej linii)
+      const phoneRegex = /(\d{3}\s+\d{3}\s+\d{3}|\+\d+)/
+      let nameLineIndex = -1
+
+      for (let i = 2; i < lines.length; i++) {
+        const phoneMatch = lines[i].match(phoneRegex)
+        if (phoneMatch && phoneMatch[1]) {
+          nameLineIndex = i
+          phoneNumber = phoneMatch[1].replace(/\s+/g, "")
+          break
+        }
       }
 
-      // Czwarta i kolejne linie to informacje o locie/kierunku
+      // Jeśli znaleźliśmy linię z numerem telefonu
+      if (nameLineIndex >= 0) {
+        const nameLine = lines[nameLineIndex]
+        const nameRegex = /([A-Za-zżźćńółęąśŻŹĆŃÓŁĘĄŚ\s]+)(?:\s+\d{3}\s+\d{3}\s+\d{3}|\s+\+\d+|\s*$)/
+        const nameMatch = nameLine.match(nameRegex)
+
+        if (nameMatch && nameMatch[1]) {
+          personName = nameMatch[1].trim()
+        } else {
+          // Jeśli nie udało się dopasować wzorca, weź całą linię jako imię i nazwisko
+          personName = nameLine.replace(phoneRegex, "").trim()
+        }
+
+        // Usuń linię z imieniem i nazwiskiem z listy linii
+        lines.splice(nameLineIndex, 1)
+      } else {
+        // Jeśli nie znaleźliśmy linii z numerem telefonu, weź trzecią linię jako imię i nazwisko
+        if (lines.length > 2) {
+          personName = lines[2]
+          // Usuń linię z imieniem i nazwiskiem z listy linii
+          lines.splice(2, 1)
+        }
+      }
+
+      // Pozostałe linie to informacje o locie/kierunku
       let flightInfo = ""
-      if (lines.length > 3) {
-        flightInfo = lines.slice(3).join(" ").trim()
+
+      // Zbierz wszystkie pozostałe linie (po usunięciu linii z samochodem, datą i imieniem)
+      if (lines.length > 2) {
+        flightInfo = lines.slice(2).join(" ").trim()
+      }
+
+      // Dodaj informacje diagnostyczne o przetwarzaniu linii
+      debugText += `\nLinie po filtrowaniu pustych: ${lines.length}\n`
+      debugText += `Imię i nazwisko: "${personName}"\n`
+      if (phoneNumber) {
+        debugText += `Telefon: ${phoneNumber}\n`
+      }
+      debugText += `Informacje o locie: "${flightInfo}"\n`
+
+      // Sprawdź, czy w tekście jest informacja o fakturze i NIP
+      let invoiceInfo = ""
+      const nipRegex = /NIP:?(\d{10})/i
+      const nipMatch = bulkText.match(nipRegex)
+
+      if (nipMatch && nipMatch[1]) {
+        setNip(nipMatch[1])
+        invoiceInfo += `NIP: ${nipMatch[1]}`
+      }
+
+      if (bulkText.toLowerCase().includes("faktura")) {
+        if (invoiceInfo) invoiceInfo += ", "
+        invoiceInfo += "Faktura"
       }
 
       // Ustaw wartości w formularzu
-      setDate(returnDate)
-      setTime(returnTime)
+      setDate(departureDate) // Data wyjazdu to data powrotu
+      setTime(departureTime) // Godzina wyjazdu to godzina powrotu
       setName(personName)
       setCarModel(carModel)
       setFlightInfo(flightInfo)
@@ -371,8 +693,38 @@ export default function CarDepartureForm() {
         setGarage(true) // Jeśli jest numer garażu, to zaznacz checkbox garażu
       }
 
-      // Nie dodawaj informacji o powrocie do dodatkowych informacji
-      setAdditionalInfo("")
+      // Ustaw numer telefonu
+      setPhone(phoneNumber)
+
+      // Ustaw licznik dni
+      setDayCounter(daysCount)
+
+      // Ustaw flagi na podstawie znalezionych słów kluczowych
+      setLeftKey(keywordsFound.has("klucze"))
+      setCharger(keywordsFound.has("ładowarki"))
+      setGeogrid(keywordsFound.has("geokratka"))
+      setSmallCar(keywordsFound.has("małe auto"))
+
+      // Ustaw dodatkowe informacje - wszystkie znalezione słowa kluczowe
+      const additionalInfoArray = Array.from(keywordsFound)
+      const additionalInfoText = additionalInfoArray.join(", ")
+
+      // Rozdziel informacje na publiczne i wewnętrzne
+      setAdditionalInfo(additionalInfoText) // Informacje dla listy
+      setForListInfo(additionalInfoText) // Informacje dla listy
+
+      // Ustaw informacje wewnętrzne (faktura, NIP)
+      if (invoiceInfo) {
+        setInternalInfo(invoiceInfo) // Informacje tylko dla nas
+      }
+
+      // Ustaw daty przyjazdu i wyjazdu
+      setComeDate(arrivalDate)
+      setComeTime(arrivalTime)
+      setLeaveDate(departureDate)
+      setLeaveTime(departureTime)
+
+      setDebugInfo(debugText)
 
       setParseResult({
         success: true,
@@ -389,6 +741,7 @@ export default function CarDepartureForm() {
         success: false,
         message: "Wystąpił błąd podczas analizy tekstu. Sprawdź format i spróbuj ponownie.",
       })
+      setDebugInfo(`Błąd: ${error.message}`)
     }
   }
 
@@ -471,8 +824,8 @@ export default function CarDepartureForm() {
   const formatDateHeader = (date: Date) => {
     const day = date.getDate().toString().padStart(2, "0")
     const month = (date.getMonth() + 1).toString().padStart(2, "0")
-    const dayName = format(date, "(EEE)", { locale: pl })
-    return `${day}.${month} ${dayName}`
+    const dayName = format(date, "EEEE", { locale: pl }).substring(0, 3)
+    return `${day}.${month} (${dayName})`
   }
 
   return (
@@ -538,6 +891,18 @@ export default function CarDepartureForm() {
               </div>
 
               <div className="space-y-2">
+                <Label htmlFor="dayCounter">Liczba dni</Label>
+                <Input
+                  id="dayCounter"
+                  type="number"
+                  min="1"
+                  value={dayCounter}
+                  onChange={(e) => setDayCounter(Number.parseInt(e.target.value) || 3)}
+                  placeholder="np. 12"
+                />
+              </div>
+
+              <div className="space-y-2">
                 <Label htmlFor="flightInfo">Numer lotu powrotnego i kierunek</Label>
                 <Input
                   id="flightInfo"
@@ -586,12 +951,25 @@ export default function CarDepartureForm() {
               )}
 
               <div className="space-y-2">
-                <Label htmlFor="additionalInfo">Dodatkowe informacje</Label>
+                <Label htmlFor="additionalInfo">Dodatkowe informacje (widoczne na liście)</Label>
                 <Textarea
                   id="additionalInfo"
                   value={additionalInfo}
-                  onChange={(e) => setAdditionalInfo(e.target.value)}
-                  placeholder="Opcjonalne informacje"
+                  onChange={(e) => {
+                    setAdditionalInfo(e.target.value)
+                    setForListInfo(e.target.value) // Synchronizuj for_list_info z additionalInfo
+                  }}
+                  placeholder="Informacje widoczne na liście"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="internalInfo">Informacje wewnętrzne (tylko dla nas)</Label>
+                <Textarea
+                  id="internalInfo"
+                  value={internalInfo}
+                  onChange={(e) => setInternalInfo(e.target.value)}
+                  placeholder="Informacje tylko dla personelu (np. faktura, NIP)"
                 />
               </div>
             </TabsContent>
@@ -649,6 +1027,11 @@ export default function CarDepartureForm() {
             )}
           </div>
 
+          <div className="flex items-center space-x-2 pt-4 border-t">
+            <Checkbox id="apiSend" checked={apiSend} onCheckedChange={(checked) => setApiSend(checked as boolean)} />
+            <Label htmlFor="apiSend">Wysyłaj dane do API</Label>
+          </div>
+
           <div className="flex space-x-2">
             <Button onClick={addDeparture} className="flex-1">
               Dodaj do listy
@@ -658,6 +1041,41 @@ export default function CarDepartureForm() {
               Wyczyść
             </Button>
           </div>
+
+          {/* Karta z informacjami wewnętrznymi */}
+          {internalInfo && (
+            <Card className="mt-4">
+              <CardHeader>
+                <CardTitle>Informacje wewnętrzne</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p>{internalInfo}</p>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Karta z informacjami diagnostycznymi */}
+          {debugInfo && showDebug && (
+            <Card className="mt-4 bg-gray-50">
+              <CardHeader className="pb-2 flex flex-row items-center justify-between">
+                <CardTitle className="text-sm">Informacje diagnostyczne</CardTitle>
+                <Button variant="outline" size="sm" onClick={() => setShowDebug(!showDebug)} className="h-6 px-2">
+                  Ukryj
+                </Button>
+              </CardHeader>
+              <CardContent>
+                <pre className="text-xs whitespace-pre-wrap">{debugInfo}</pre>
+              </CardContent>
+            </Card>
+          )}
+
+          {debugInfo && !showDebug && (
+            <div className="mt-4">
+              <Button variant="outline" size="sm" onClick={() => setShowDebug(!showDebug)} className="w-full">
+                Pokaż informacje diagnostyczne
+              </Button>
+            </div>
+          )}
         </div>
 
         <div className="space-y-4">
@@ -692,7 +1110,7 @@ export default function CarDepartureForm() {
                             <div className="mx-2 font-bold">
                               {departure.paid
                                 ? "Z"
-                                : `DZ ${departure.paymentAmount ? departure.paymentAmount + " zł" : ""}`}
+                                : `DZ ${departure.paymentAmount ? Math.round(Number.parseFloat(departure.paymentAmount)) + " zł" : ""}`}
                             </div>
                             <div className="mx-2">|</div>
                             <div className="mx-2">{departure.flightInfo}</div>
@@ -749,7 +1167,7 @@ export default function CarDepartureForm() {
                             <div className="mx-2 font-bold">
                               {departure.paid
                                 ? "Z"
-                                : `DZ ${departure.paymentAmount ? departure.paymentAmount + " zł" : ""}`}
+                                : `DZ ${departure.paymentAmount ? Math.round(Number.parseFloat(departure.paymentAmount)) + " zł" : ""}`}
                             </div>
                             <div className="mx-2">|</div>
                             <div className="mx-2">{departure.flightInfo}</div>
@@ -806,7 +1224,7 @@ export default function CarDepartureForm() {
                           <div className="mx-2 font-bold">
                             {departure.paid
                               ? "Z"
-                              : `DZ ${departure.paymentAmount ? departure.paymentAmount + " zł" : ""}`}
+                              : `DZ ${departure.paymentAmount ? Math.round(Number.parseFloat(departure.paymentAmount)) + " zł" : ""}`}
                           </div>
                           <div className="mx-2">|</div>
                           <div className="mx-2">{departure.flightInfo}</div>
@@ -821,7 +1239,7 @@ export default function CarDepartureForm() {
                           {departure.additionalInfo && (
                             <>
                               <div className="mx-2">|</div>
-                              <div className="mx-2">{departure.additionalInfo}</div>
+                              <div className="mx-2 font-bold">{departure.additionalInfo}</div>
                             </>
                           )}
                           <Button
